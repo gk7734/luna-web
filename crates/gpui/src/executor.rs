@@ -5,9 +5,9 @@ use futures::prelude::*;
 use gpui_util::{TryFutureExt, TryFutureExtBacktrace};
 use scheduler::Instant;
 use scheduler::Scheduler;
-use std::{future::Future, marker::PhantomData, rc::Rc, sync::Arc, time::Duration};
+use std::{future::Future, marker::PhantomData, pin::Pin, rc::Rc, sync::Arc, time::Duration};
 #[cfg(not(target_family = "wasm"))]
-use std::{mem, pin::Pin};
+use std::mem;
 
 pub use scheduler::{
     DedicatedExecutor, FallibleTask, LocalExecutor as SchedulerLocalExecutor, Priority, Task,
@@ -166,6 +166,27 @@ impl BackgroundExecutor {
         for task in spawned {
             task.await;
         }
+    }
+
+    /// Runs tasks that may borrow from their environment and waits for all of them to complete.
+    #[cfg(target_family = "wasm")]
+    pub async fn scoped<'scope, F>(&self, scheduler: F)
+    where
+        F: FnOnce(&mut Scope<'scope>),
+    {
+        let mut scope = Scope::new(self.clone());
+        (scheduler)(&mut scope);
+        future::join_all(scope.futures).await;
+    }
+
+    /// Runs tasks that may borrow from their environment and waits for all of them to complete.
+    /// They run inside the awaiting task, so the priority doesn't apply.
+    #[cfg(target_family = "wasm")]
+    pub async fn scoped_priority<'scope, F>(&self, _priority: Priority, scheduler: F)
+    where
+        F: FnOnce(&mut Scope<'scope>),
+    {
+        self.scoped(scheduler).await;
     }
 
     /// Get the current time.
@@ -530,6 +551,40 @@ impl Drop for Scope<'_> {
             .inner
             .scheduler()
             .block(None, future.as_mut(), None);
+    }
+}
+
+/// Scope manages a set of tasks that are waited on together. See [`BackgroundExecutor::scoped`].
+///
+/// The browser's main thread can't block, so a scope can't wait for other threads in `Drop` the
+/// way native builds do. Its futures run together inside the awaiting task instead, which keeps
+/// their borrows sound without that wait.
+#[cfg(target_family = "wasm")]
+pub struct Scope<'a> {
+    executor: BackgroundExecutor,
+    futures: Vec<Pin<Box<dyn Future<Output = ()> + Send + 'a>>>,
+}
+
+#[cfg(target_family = "wasm")]
+impl<'a> Scope<'a> {
+    fn new(executor: BackgroundExecutor) -> Self {
+        Self {
+            executor,
+            futures: Vec::new(),
+        }
+    }
+
+    /// How many CPUs are available to the dispatcher.
+    pub fn num_cpus(&self) -> usize {
+        self.executor.num_cpus()
+    }
+
+    /// Spawn a future into this scope.
+    pub fn spawn<F>(&mut self, future: F)
+    where
+        F: Future<Output = ()> + Send + 'a,
+    {
+        self.futures.push(Box::pin(future));
     }
 }
 

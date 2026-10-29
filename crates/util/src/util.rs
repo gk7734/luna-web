@@ -9,9 +9,7 @@ pub mod command;
 pub mod fs;
 #[cfg(not(target_family = "wasm"))]
 pub mod process;
-#[cfg(not(target_family = "wasm"))]
 pub mod shell;
-#[cfg(not(target_family = "wasm"))]
 pub mod shell_builder;
 #[cfg(not(target_family = "wasm"))]
 pub mod shell_env;

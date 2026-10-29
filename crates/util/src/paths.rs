@@ -41,6 +41,15 @@ pub fn home_dir() -> &'static PathBuf {
     })
 }
 
+/// The browser has no user account, so the web build's virtual filesystem keeps what native
+/// builds put in the home directory under a fixed path.
+#[cfg(target_family = "wasm")]
+pub fn home_dir() -> &'static PathBuf {
+    static HOME_DIR: std::sync::LazyLock<PathBuf> =
+        std::sync::LazyLock::new(|| PathBuf::from("/home/web"));
+    &HOME_DIR
+}
+
 pub trait PathExt {
     /// Compacts a given file path by replacing the user's home directory
     /// prefix with a tilde (`~`).
