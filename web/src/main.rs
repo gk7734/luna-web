@@ -1,15 +1,16 @@
 #![cfg_attr(target_family = "wasm", no_main)]
 
+mod syntax_highlight;
 mod text_input;
 
 use anyhow::{Result, ensure};
 use futures::AsyncReadExt;
 use gpui::{
-    App, Bounds, Context, Entity, FocusHandle, Focusable, KeyBinding, SharedString, Task, Window,
-    WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
+    App, Bounds, Context, Entity, FocusHandle, Focusable, HighlightStyle, KeyBinding, SharedString,
+    StyledText, Task, Window, WindowBounds, WindowOptions, div, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Range};
 use text_input::{
     Backspace, Copy, Cut, Delete, End, Home, Left, Paste, Right, SelectAll, SelectLeft,
     SelectRight, TextInput,
@@ -21,17 +22,59 @@ use text_input::{
 const KOREAN_FONT_PATH: &str = "/fonts/NanumGothicCoding-Regular.ttf";
 const CODE_FONT: &str = "Lilex";
 
-const SAMPLE_CODE: &[&str] = &[
-    "// 브라우저에서 돌아가는 Luna 렌더링 테스트",
-    "fn greet(name: &str) -> String {",
-    "    // 한글 주석과 문자열도 같은 폰트 경로로 그려집니다",
-    "    format!(\"안녕하세요, {name}님!\")",
-    "}",
-    "",
-    "fn main() {",
-    "    println!(\"{}\", greet(\"루나\"));",
-    "}",
-];
+const SAMPLE_CODE: &str = r#"// 브라우저에서 tree-sitter로 문법 강조한 Luna 코드
+#[derive(Debug, Clone)]
+struct Greeting<'a> {
+    name: &'a str,
+    count: u32,
+}
+
+impl<'a> Greeting<'a> {
+    /// 한글 주석과 문자열도 같은 폰트 경로로 그려집니다
+    fn render(&self) -> String {
+        let suffix = if self.count > 1 { "들" } else { "" };
+        format!("안녕하세요, {}님{suffix}!", self.name)
+    }
+}
+
+fn main() {
+    let greeting = Greeting { name: "루나", count: 2 };
+    println!("{}", greeting.render());
+}"#;
+
+struct CodeLine {
+    text: SharedString,
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
+}
+
+/// Splits highlights computed over the whole source into per-line ones, so each line renders as
+/// its own row next to its line number.
+fn highlighted_lines(source: &str) -> (Vec<CodeLine>, Option<SharedString>) {
+    let (highlights, error) = match syntax_highlight::highlight_rust(source) {
+        Ok(highlights) => (highlights, None),
+        Err(error) => (Vec::new(), Some(format!("{error:#}").into())),
+    };
+    let mut lines = Vec::new();
+    let mut line_start = 0;
+    for line in source.split('\n') {
+        let line_end = line_start + line.len();
+        let line_highlights = highlights
+            .iter()
+            .filter(|(range, _)| range.start < line_end && range.end > line_start)
+            .map(|(range, style)| {
+                let start = range.start.max(line_start) - line_start;
+                let end = range.end.min(line_end) - line_start;
+                (start..end, *style)
+            })
+            .collect();
+        lines.push(CodeLine {
+            text: line.to_string().into(),
+            highlights: line_highlights,
+        });
+        line_start = line_end + 1;
+    }
+    (lines, error)
+}
 
 enum FontState {
     Loading,
@@ -41,6 +84,8 @@ enum FontState {
 
 struct LunaWebPoc {
     text_input: Entity<TextInput>,
+    code_lines: Vec<CodeLine>,
+    highlight_error: Option<SharedString>,
     font_state: FontState,
     _font_download: Task<()>,
     focus_handle: FocusHandle,
@@ -50,8 +95,11 @@ impl LunaWebPoc {
     fn new(cx: &mut Context<Self>) -> Self {
         let text_input = cx.new(|cx| TextInput::new("여기에 한글을 입력해 보세요", cx));
         cx.observe(&text_input, |_, _, cx| cx.notify()).detach();
+        let (code_lines, highlight_error) = highlighted_lines(SAMPLE_CODE);
         Self {
             text_input,
+            code_lines,
+            highlight_error,
             font_state: FontState::Loading,
             _font_download: Self::load_korean_font(cx),
             focus_handle: cx.focus_handle(),
@@ -139,7 +187,14 @@ impl Render for LunaWebPoc {
                     .p_4()
                     .font_family(CODE_FONT)
                     .text_size(px(15.))
-                    .children(SAMPLE_CODE.iter().enumerate().map(|(index, line)| {
+                    .when_some(self.highlight_error.clone(), |this, error| {
+                        this.child(
+                            div()
+                                .text_color(rgb(0xe06c75))
+                                .child(format!("Highlighting failed: {error}")),
+                        )
+                    })
+                    .children(self.code_lines.iter().enumerate().map(|(index, line)| {
                         div()
                             .flex()
                             .flex_row()
@@ -150,7 +205,10 @@ impl Render for LunaWebPoc {
                                     .text_color(rgb(0x495162))
                                     .child(format!("{}", index + 1)),
                             )
-                            .child(div().child(*line))
+                            .child(
+                                StyledText::new(line.text.clone())
+                                    .with_highlights(line.highlights.iter().cloned()),
+                            )
                     })),
             )
             .child(

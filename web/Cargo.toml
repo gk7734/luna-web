@@ -17,10 +17,18 @@ futures = "0.3"
 gpui = { path = "../crates/gpui" }
 gpui_platform = { path = "../crates/gpui_platform" }
 log = "0.4"
+streaming-iterator = "0.1"
+tree-sitter = { git = "https://github.com/tree-sitter/tree-sitter", rev = "43623ec9bf0eaaf7113285c46e8a09018f181b18" }
+tree-sitter-rust = "0.24.2"
 unicode-segmentation = "1"
 wasm-bindgen = "0.2"
 wasm_thread = { git = "https://github.com/zed-industries/wasm_thread", rev = "0cf96c7708dfb97ccf3da50347e25edcf75d6937", features = ["es_modules"] }
 web-sys = { version = "0.3", features = ["Location", "Window"] }
+
+# Same as the root workspace: grammar crates from crates.io must share the git tree-sitter's
+# `tree_sitter_language`, or their constants won't convert into `tree_sitter::Language`.
+[patch.crates-io]
+tree-sitter-language = { git = "https://github.com/tree-sitter/tree-sitter", rev = "43623ec9bf0eaaf7113285c46e8a09018f181b18" }
 
 [profile.release]
 opt-level = "z"

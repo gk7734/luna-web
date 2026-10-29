@@ -880,6 +880,12 @@ impl LanguageRegistry {
                     *grammar = AvailableGrammar::Loading(wasm_path.clone(), vec![tx]);
                     self.executor
                         .spawn(async move {
+                            #[cfg(target_family = "wasm")]
+                            let grammar_result: Result<tree_sitter::Language, Arc<anyhow::Error>> =
+                                Err(Arc::new(anyhow::anyhow!(
+                                    "grammars from extensions can't be loaded on the web"
+                                )));
+                            #[cfg(not(target_family = "wasm"))]
                             let grammar_result = maybe!({
                                 let wasm_bytes = std::fs::read(&wasm_path)?;
                                 let grammar_name = wasm_path
