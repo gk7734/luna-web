@@ -1,3 +1,5 @@
+> [!IMPORTANT]
+> Remove this line to confirm you've reviewed this PR before submitting.
 # Luna
 
 <img src="crates/zed/resources/luna/app-icon.svg" width="128" alt="Luna icon">

@@ -1,0 +1,7 @@
+[serve]
+addresses = ["127.0.0.1"]
+port = 8081
+open = false
+
+# SharedArrayBuffer, which GPUI's threads need, is only available to cross-origin-isolated pages.
+headers = { "Cross-Origin-Embedder-Policy" = "require-corp", "Cross-Origin-Opener-Policy" = "same-origin" }
